@@ -126,7 +126,6 @@ defmodule NanoAi.LLM.Trainer do
     epochs = Keyword.get(opts, :epochs, 1)
     log_every = Keyword.get(opts, :log_every, 1)
     checkpoint_every = Keyword.get(opts, :checkpoint_every, 100)
-    gc_every = Keyword.get(opts, :gc_every, 3)
 
     optimizer = build_optimizer(opts)
     loss = build_loss(opts)
@@ -135,8 +134,7 @@ defmodule NanoAi.LLM.Trainer do
     |> Loop.trainer(loss, optimizer)
     |> Loop.log(&log_message/1, event: :iteration_completed, filter: [every: log_every])
     |> Loop.checkpoint(event: :iteration_completed, filter: [every: checkpoint_every], path: @checkpoint_path)
-    |> Loop.handle_event(:iteration_completed, &run_gc/1, every: gc_every)
-    |> Loop.run(train_data, %{}, epochs: epochs)
+    |> Loop.run(train_data, %{}, epochs: epochs, garbage_collect: true, force_garbage_collection?: true)
   end
 
   @doc """
@@ -152,7 +150,6 @@ defmodule NanoAi.LLM.Trainer do
     epochs = Keyword.get(opts, :epochs, 1)
     log_every = Keyword.get(opts, :log_every, 100)
     checkpoint_every = Keyword.get(opts, :checkpoint_every, 100)
-    gc_every = Keyword.get(opts, :gc_every, 3)
 
     optimizer = build_optimizer(opts)
     loss = build_loss(opts)
@@ -163,9 +160,8 @@ defmodule NanoAi.LLM.Trainer do
     |> Loop.trainer(loss, optimizer)
     |> Loop.log(&log_message/1, event: :iteration_completed, filter: [every: log_every])
     |> Loop.checkpoint(event: :iteration_completed, filter: [every: checkpoint_every], path: @checkpoint_path)
-    |> Loop.handle_event(:iteration_completed, &run_gc/1, every: gc_every)
     |> Loop.from_state(state)
-    |> Loop.run(train_data, %{}, epochs: epochs)
+    |> Loop.run(train_data, %{}, epochs: epochs, garbage_collect: true, force_garbage_collection?: true)
   end
 
   defp build_optimizer(opts) do
@@ -234,23 +230,10 @@ defmodule NanoAi.LLM.Trainer do
     "\n[Training] Step #{state.iteration}, Epoch #{state.epoch}, Loss: #{Nx.to_number(metrics["loss"])} | Memory: #{memory_info}"
   end
 
-  defp run_gc(state) do
-    # Force garbage collection to free up memory
-    :erlang.garbage_collect()
-
-    # If using EMLX backend, we may need to explicitly deallocate tensors
-    # This helps prevent memory accumulation on GPU
-    Logger.debug("[Memory] Garbage collection performed at iteration #{state.iteration}")
-
-    {:continue, state}
-  end
-
   defp get_memory_info do
     memory_data = :erlang.memory()
     total_mb = div(memory_data[:total], 1_048_576)
     processes_mb = div(memory_data[:processes], 1_048_576)
     "#{total_mb}MB total, #{processes_mb}MB processes"
-  rescue
-    _ -> "N/A"
   end
 end
