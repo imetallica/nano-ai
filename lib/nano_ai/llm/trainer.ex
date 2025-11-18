@@ -1,0 +1,256 @@
+defmodule NanoAi.LLM.Trainer do
+  @moduledoc """
+  Generic training loop for language models.
+
+  ## Overview
+
+  This trainer works with any language model architecture:
+  - GPT (decoder-only transformer)
+  - Mixture of Experts (MoE) (Soon)
+  - Mamba/SSM (Soon)
+  - Hybrid architectures (Soon)
+
+  The only requirement is that the model:
+  1. Takes input token IDs: [batch, seq_len]
+  2. Outputs logits: [batch, seq_len, vocab_size]
+
+  ## Loss Function
+
+  Cross-Entropy Loss for language modeling:
+
+      loss = -1/N × Σ log(P(correct_token))
+
+  For each position, we compute the negative log probability of the correct next token.
+  Lower loss = better predictions.
+
+  ## Training Data Format
+
+      Input:  [token_1, token_2, ..., token_n]
+      Target: [token_2, token_3, ..., token_n+1]
+
+  The model learns to predict each token given all previous tokens.
+
+  ## Optimizer
+
+  Common choices for LLMs:
+  - **AdamW**: Adam with proper weight decay (most common)
+  - **Adam**: Adaptive learning rates
+  - **SGD**: Simple but requires careful tuning
+
+  AdamW is standard for transformer training.
+
+  ## Learning Rate Schedule
+
+  Typical schedule:
+  1. **Warmup**: Gradually increase LR from 0 to peak (e.g., first 1000 steps)
+  2. **Cosine decay**: Smoothly decrease LR to minimum
+
+  This helps avoid early training instability.
+
+  ## Key Hyperparameters
+
+  - **Learning rate**: Peak LR (e.g., 3e-4 for small models, 1e-4 for large)
+  - **Batch size**: Number of sequences per step (limited by GPU memory)
+  - **Weight decay**: L2 regularization strength (e.g., 0.1)
+  - **Gradient clipping**: Max gradient norm (e.g., 1.0)
+  - **Warmup steps**: Steps to reach peak LR (e.g., 1000)
+
+  ## Training Loop Structure
+
+      for epoch in 1..num_epochs do
+        for batch in data do
+          # Forward pass
+          logits = model(batch.input_ids)
+
+          # Compute loss
+          loss = cross_entropy(logits, batch.target_ids)
+
+          # Backward pass + update
+          params = optimizer_step(params, gradients(loss))
+        end
+      end
+
+  ## Metrics to Monitor
+
+  - **Training loss**: Should decrease over time
+  - **Validation loss**: Monitor for overfitting
+  - **Perplexity**: exp(loss) - interpretable metric
+  - **Learning rate**: Track schedule
+  - **Gradient norm**: Check for exploding/vanishing gradients
+
+  ## Usage
+
+      # Prepare data
+      train_data = NanoAi.LLM.DataLoader.load("train.txt")
+
+      # Build model
+      model = NanoAi.LLM.GPT.build()
+
+      # Train
+      trained_params = NanoAi.LLM.Trainer.train(model, train_data,
+        epochs: 10,
+        batch_size: 8,
+        learning_rate: 3.0e-4
+      )
+  """
+
+  alias Axon.Loop
+  alias Axon.Loop.State
+  alias Axon.Losses
+  alias Polaris.Optimizers
+
+  require Logger
+
+  @checkpoint_path "priv/data/checkpoint"
+
+  @doc """
+  Trains a language model on the given data.
+
+  ## Parameters
+    - model: Axon model (any architecture that outputs logits)
+    - train_data: Stream or list of batches
+    - opts: Training options
+
+  ## Options
+    - :epochs - Number of training epochs. Default: 1
+    - :learning_rate - Peak learning rate. Default: 3.0e-4
+    - :optimizer - Optimizer to use. Default: :adamw
+    - :loss - Loss function. Default: :cross_entropy
+    - :weight_decay - AdamW weight decay. Default: 0.1
+    - :warmup_steps - LR warmup steps. Default: 100
+    - :max_grad_norm - Gradient clipping. Default: 1.0
+    - :log_every - Log metrics every N steps. Default: 100
+    - :checkpoint_every - Save model every N steps. Default: 100
+  """
+  def train(model, train_data, opts \\ []) do
+    epochs = Keyword.get(opts, :epochs, 1)
+    log_every = Keyword.get(opts, :log_every, 1)
+    checkpoint_every = Keyword.get(opts, :checkpoint_every, 100)
+    gc_every = Keyword.get(opts, :gc_every, 3)
+
+    optimizer = build_optimizer(opts)
+    loss = build_loss(opts)
+
+    model
+    |> Loop.trainer(loss, optimizer)
+    |> Loop.log(&log_message/1, event: :iteration_completed, filter: [every: log_every])
+    |> Loop.checkpoint(event: :iteration_completed, filter: [every: checkpoint_every], path: @checkpoint_path)
+    |> Loop.handle_event(:iteration_completed, &run_gc/1, every: gc_every)
+    |> Loop.run(train_data, %{}, epochs: epochs)
+  end
+
+  @doc """
+  Resumes training from a serialized state.
+
+  ## Parameters
+    - model: Axon model
+    - train_data: Training data
+    - state_path: Path to serialized state file
+    - opts: Training options
+  """
+  def resume(model, train_data, state_path, opts \\ []) do
+    epochs = Keyword.get(opts, :epochs, 1)
+    log_every = Keyword.get(opts, :log_every, 100)
+    checkpoint_every = Keyword.get(opts, :checkpoint_every, 100)
+    gc_every = Keyword.get(opts, :gc_every, 3)
+
+    optimizer = build_optimizer(opts)
+    loss = build_loss(opts)
+
+    state = state_path |> File.read!() |> Loop.deserialize_state()
+
+    model
+    |> Loop.trainer(loss, optimizer)
+    |> Loop.log(&log_message/1, event: :iteration_completed, filter: [every: log_every])
+    |> Loop.checkpoint(event: :iteration_completed, filter: [every: checkpoint_every], path: @checkpoint_path)
+    |> Loop.handle_event(:iteration_completed, &run_gc/1, every: gc_every)
+    |> Loop.from_state(state)
+    |> Loop.run(train_data, %{}, epochs: epochs)
+  end
+
+  defp build_optimizer(opts) do
+    optimizer_type = Keyword.get(opts, :optimizer, :adamw)
+    learning_rate = Keyword.get(opts, :learning_rate, 3.0e-4)
+    weight_decay = Keyword.get(opts, :weight_decay, 0.1)
+    max_grad_norm = Keyword.get(opts, :max_grad_norm, 1.0)
+
+    optimizer =
+      case optimizer_type do
+        :adamw ->
+          Optimizers.adamw(learning_rate: learning_rate, decay: weight_decay)
+
+        :adam ->
+          Optimizers.adam(learning_rate: learning_rate)
+
+        :sgd ->
+          Optimizers.sgd(learning_rate: learning_rate)
+
+        custom when is_function(custom) ->
+          custom
+      end
+
+    Polaris.Updates.compose(
+      Polaris.Updates.clip_by_global_norm(max_norm: max_grad_norm),
+      optimizer
+    )
+  end
+
+  defp build_loss(opts) do
+    loss_type = Keyword.get(opts, :loss, :cross_entropy)
+
+    case loss_type do
+      :cross_entropy ->
+        &cross_entropy_loss/2
+
+      :cross_entropy_with_label_smoothing ->
+        smoothing = Keyword.get(opts, :label_smoothing, 0.1)
+        &cross_entropy_loss(&1, &2, smoothing: smoothing)
+
+      custom when is_function(custom) ->
+        custom
+    end
+  end
+
+  defp cross_entropy_loss(y_true, y_pred, _opts \\ []) do
+    # y_pred: [batch, seq_len, vocab_size] (logits)
+    # y_true: [batch, seq_len, 1] (target token IDs)
+    # IO.inspect(Nx.shape(y_pred), label: "y_pred shape")
+    # IO.inspect(Nx.shape(y_true), label: "y_true shape")
+
+    y_true = Nx.new_axis(y_true, -1)
+    # IO.inspect(Nx.shape(y_true), label: "y_true after new_axis")
+
+    Losses.categorical_cross_entropy(y_true, y_pred,
+      from_logits: true,
+      sparse: true,
+      reduction: :mean
+    )
+  end
+
+  defp log_message(%State{metrics: metrics} = state) do
+    # Log memory usage if available
+    memory_info = get_memory_info()
+
+    "\n[Training] Step #{state.iteration}, Epoch #{state.epoch}, Loss: #{Nx.to_number(metrics["loss"])} | Memory: #{memory_info}"
+  end
+
+  defp run_gc(state) do
+    # Force garbage collection to free up memory
+    :erlang.garbage_collect()
+
+    # If using EMLX backend, we may need to explicitly deallocate tensors
+    # This helps prevent memory accumulation on GPU
+    Logger.debug("[Memory] Garbage collection performed at iteration #{state.iteration}")
+
+    {:continue, state}
+  end
+
+  defp get_memory_info do
+    memory_data = :erlang.memory()
+    total_mb = div(memory_data[:total], 1_048_576)
+    processes_mb = div(memory_data[:processes], 1_048_576)
+    "#{total_mb}MB total, #{processes_mb}MB processes"
+  rescue
+    _ -> "N/A"
+  end
+end
