@@ -33,6 +33,7 @@ defmodule NanoAi.MixProject do
 
       # Coding style
       {:styler, ">= 0.0.0", only: [:dev, :test], runtime: false, optional: true},
+      {:table_rex, "== 4.1.0", only: [:dev, :test], optional: true},
 
       # Specific for Mac, select other versions as needed
       {:emlx, "== 0.2.0", optional: true}

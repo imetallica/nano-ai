@@ -94,6 +94,8 @@ defmodule NanoAi.LLM.Trainer do
       )
   """
 
+  import Nx.Defn
+
   alias Axon.Loop
   alias Axon.Loop.State
   alias Axon.Losses
@@ -207,16 +209,16 @@ defmodule NanoAi.LLM.Trainer do
     end
   end
 
-  defp cross_entropy_loss(y_true, y_pred, _opts \\ []) do
-    # y_pred: [batch, seq_len, vocab_size] (logits)
-    # y_true: [batch, seq_len, 1] (target token IDs)
-    # IO.inspect(Nx.shape(y_pred), label: "y_pred shape")
-    # IO.inspect(Nx.shape(y_true), label: "y_true shape")
+  defnp cross_entropy_loss(y_true, y_pred, _opts \\ []) do
+    # y_true: [batch, seq_len]
+    # y_pred: [batch, seq_len, vocab_size]
+    {_, y_true_dim} = Nx.shape(y_true)
+    {_, y_pred_dim, _} = Nx.shape(y_pred)
+    y_true_shifted = Nx.slice_along_axis(y_true, 1, y_true_dim - 1, axis: 1)
+    y_pred_shifted = Nx.slice_along_axis(y_pred, 0, y_pred_dim - 1, axis: 1)
+    y_true_shifted = Nx.new_axis(y_true_shifted, -1)
 
-    y_true = Nx.new_axis(y_true, -1)
-    # IO.inspect(Nx.shape(y_true), label: "y_true after new_axis")
-
-    Losses.categorical_cross_entropy(y_true, y_pred,
+    Losses.categorical_cross_entropy(y_true_shifted, y_pred_shifted,
       from_logits: true,
       sparse: true,
       reduction: :mean

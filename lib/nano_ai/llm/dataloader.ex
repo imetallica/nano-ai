@@ -34,12 +34,7 @@ defmodule NanoAi.LLM.Dataloader do
 
   ## Input-Target Pairs
 
-  For next-token prediction:
-
-      Tokenized: [1, 2, 3, 4, 5, ..., 1024]
-
-      Input:  [1, 2, 3, ..., 1023, 0]     # Drop last token, pad end
-      Target: [2, 3, 4, ..., 1024]        # Drop first token (shift left)
+  In the loss function the shifting of the inputs and targets happens.
 
   ## Batching
 
@@ -74,9 +69,6 @@ defmodule NanoAi.LLM.Dataloader do
       # Use with trainer
       NanoAi.LLM.Trainer.train(model, train_data, epochs: 10)
   """
-
-  import Nx.Defn
-
   alias NanoAi.Tokenizer
 
   @doc """
@@ -140,19 +132,11 @@ defmodule NanoAi.LLM.Dataloader do
         ids
         |> Nx.from_binary(:u32)
         |> Nx.backend_transfer()
-        |> ids_to_input_and_target()
+        |> then(fn ids -> {ids, ids} end)
 
       {:error, _} ->
         nil
     end
-  end
-
-  defnp ids_to_input_and_target(ids) do
-    {size} = Nx.shape(ids)
-
-    input = Nx.concatenate([Nx.slice_along_axis(ids, 0, size - 1, axis: 0), Nx.tensor([0])])
-    target = Nx.concatenate([Nx.slice_along_axis(ids, 1, size - 1, axis: 0), Nx.tensor([0])])
-    {input, target}
   end
 
   # Filter out failed tokenizations

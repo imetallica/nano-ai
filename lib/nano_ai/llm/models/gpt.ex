@@ -1,4 +1,4 @@
-defmodule NanoAi.LLM.GPT do
+defmodule NanoAi.LLM.Models.GPT do
   @moduledoc """
   GPT-like language model built with Axon.
 
