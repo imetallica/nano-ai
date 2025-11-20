@@ -104,6 +104,7 @@ defmodule NanoAi.LLM.Trainer do
   require Logger
 
   @checkpoint_path "priv/data/checkpoint"
+  @trained_models_path "priv/data/trained/models"
 
   @doc """
   Trains a language model on the given data.
@@ -164,6 +165,27 @@ defmodule NanoAi.LLM.Trainer do
     |> Loop.checkpoint(event: :iteration_completed, filter: [every: checkpoint_every], path: @checkpoint_path)
     |> Loop.from_state(state)
     |> Loop.run(train_data, %{}, epochs: epochs, garbage_collect: true, force_garbage_collection?: true)
+  end
+
+  def save(model, name, _opts \\ []) do
+    path = Path.join([@trained_models_path, "#{name}.axon"])
+
+    %{params: model, datetime: DateTime.utc_now(), nx_version: to_string(Application.spec(:nx, :vsn))}
+    |> Nx.serialize()
+    |> then(&File.write(path, &1))
+    |> tap(fn _ ->
+      Logger.info("Model saved at: #{path}.")
+    end)
+  end
+
+  def load(name, _opts \\ []) do
+    path = Path.join([@trained_models_path, "#{name}.axon"])
+
+    with {:ok, contents} <- File.read(path) do
+      %{params: model, datetime: datetime, nx_version: nx_version} = Nx.deserialize(contents)
+      Logger.info("Loaded model saved in #{datetime} with Nx version #{nx_version}.")
+      {:ok, model}
+    end
   end
 
   defp build_optimizer(opts) do
