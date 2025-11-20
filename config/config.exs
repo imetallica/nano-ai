@@ -4,7 +4,7 @@ import Config
 sequence_length = 1024
 vocab_size = 65_536
 
-config :nano_ai, NanoAi.LLM.GPT,
+config :nano_ai, NanoAi.LLM.Models.GPT,
   sequence_length: sequence_length,
   # Must match tokenizer vocab size
   vocab_size: vocab_size,

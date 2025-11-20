@@ -13,9 +13,9 @@ defmodule NanoAi.LLM.Layers.CausalSelfAttention do
       Attention(Q, K, V) = softmax(Q × K^T / √d_k) × V
 
   Where:
-  - Q (Query): "What am I looking for?"
-  - K (Key): "What do I contain?"
-  - V (Value): "What information do I provide?"
+  - **Q (Query)**: "What am I looking for?"
+  - **K (Key)**: "What do I contain?"
+  - **V (Value)**: "What information do I provide?"
 
   ## Step-by-Step Process
 
@@ -29,43 +29,52 @@ defmodule NanoAi.LLM.Layers.CausalSelfAttention do
       K = input × W_k    # [batch, seq_len, n_embd]
       V = input × W_v    # [batch, seq_len, n_embd]
 
-  Each token becomes a query (asking what to attend to), a key (advertising its content),
-  and a value (providing its information).
+  Each token becomes:
+  - A **query** (asking what to attend to)
+  - A **key** (advertising its content)
+  - A **value** (providing its information)
 
   ### 2. Multi-Head Split
 
   We split the embedding dimension into multiple heads for parallel attention:
 
-      n_head = 12, n_embd = 768
-      head_dim = n_embd / n_head = 64
+      n_head = 6, n_embd = 768
+      head_dim = n_embd / n_head = 128
 
       Q: [batch, seq_len, n_embd] → [batch, n_head, seq_len, head_dim]
       K: [batch, seq_len, n_embd] → [batch, n_head, seq_len, head_dim]
       V: [batch, seq_len, n_embd] → [batch, n_head, seq_len, head_dim]
 
-  Each head can learn different attention patterns (syntax, semantics, position, etc.).
+  Each head can learn different attention patterns:
+  - Head 1: Syntax and grammar
+  - Head 2: Semantic relationships
+  - Head 3: Positional dependencies
+  - Head 4: Long-range context
+  - Head 5: Local word pairs
+  - Head 6: Coreference resolution
 
   ### 3. Attention Scores
 
   Compute similarity between all query-key pairs:
 
-      scores = Q × K^T    # [batch, n_head, seq_len, seq_len]
+      scores = Q × K^T / √head_dim    # [batch, n_head, seq_len, seq_len]
 
-      # Example for 4 tokens:
+      # Example for 4 tokens (before scaling and masking):
       #            tok0  tok1  tok2  tok3
       # tok0   [   0.5   0.2   0.1   0.3  ]
       # tok1   [   0.4   0.6   0.2   0.1  ]
       # tok2   [   0.3   0.5   0.7   0.2  ]
       # tok3   [   0.2   0.3   0.4   0.8  ]
 
-  scores[i][j] represents how much token i should attend to token j.
+  `scores[i][j]` represents how much token i should attend to token j.
 
   ### 4. Scaling
 
       scores = scores / √head_dim
 
+  **Why scale?**
   Prevents dot products from becoming too large, which would cause softmax
-  to produce extreme (nearly one-hot) distributions.
+  to produce extreme (nearly one-hot) distributions. Maintains stable gradients.
 
   ### 5. Causal Masking (Critical!)
 
@@ -101,76 +110,225 @@ defmodule NanoAi.LLM.Layers.CausalSelfAttention do
       # tok2   [   0.2   0.3   0.5   0.0  ]
       # tok3   [   0.1   0.2   0.3   0.4  ]
 
-  ### 7. Apply Attention to Values
+  Each row sums to 1.0 and represents how much each position attends to others.
 
-  Weighted sum of value vectors:
+  ### 7. Apply to Values
+
+  Use attention weights to aggregate information from values:
 
       output = attention_weights × V    # [batch, n_head, seq_len, head_dim]
 
-      # Each output is a weighted combination:
-      # output[tok2] = 0.2×V[tok0] + 0.3×V[tok1] + 0.5×V[tok2]
+  Each output token is a weighted combination of all (previous) value vectors.
 
-  This aggregates information from attended tokens into a new representation.
+  ### 8. Merge Heads
 
-  ### 8. Concatenate Heads
+  Concatenate all heads back together:
 
-  Merge all heads back together:
-
-      output: [batch, n_head, seq_len, head_dim] → [batch, seq_len, n_embd]
+      [batch, n_head, seq_len, head_dim] → [batch, seq_len, n_embd]
 
   ### 9. Output Projection
 
-  Final linear transformation:
+  Final linear projection:
 
-      output = output × W_proj    # [batch, seq_len, n_embd]
+      output = merged × W_o    # [batch, seq_len, n_embd]
 
-  This allows the model to mix information across heads.
+  ## Multi-Head Attention Benefits
 
-  ## Multi-Query Attention (MQA) / Grouped-Query Attention (GQA)
+  Instead of one attention operation, we run N parallel operations (heads):
 
-  Standard multi-head attention: each head has its own Q, K, V projections.
+  **Why multiple heads?**
+  - Different heads can focus on different aspects:
+    - Syntactic patterns (subject-verb agreement)
+    - Semantic relationships (entity connections)
+    - Positional information (nearby words)
+    - Long-range dependencies (discourse structure)
 
-  MQA/GQA optimization: multiple query heads share the same key and value heads.
-  This reduces memory usage (smaller KV cache) with minimal quality loss.
+  - Provides redundancy and robustness
+  - Allows learning diverse attention patterns
+  - More parameters without significantly more compute
 
-      Standard MHA:  n_head = 12, n_kv_head = 12  (no sharing)
-      GQA:           n_head = 12, n_kv_head = 4   (3 Q heads per KV head)
-      MQA:           n_head = 12, n_kv_head = 1   (all Q heads share 1 KV)
+  ## Causal Masking Deep Dive
 
-  ## Why Self-Attention Works
+  **Why is causal masking necessary?**
 
-  1. **Global context**: Every token can (potentially) attend to every other token
-  2. **Dynamic weights**: Attention patterns change based on input content
-  3. **Parallel computation**: All positions computed simultaneously (unlike RNNs)
-  4. **Interpretable**: Attention weights show what the model focuses on
+  During training:
+  - We process entire sequences in parallel
+  - Without masking, token at position i could "cheat" by looking at token i+1
+  - The model would learn to just copy the next token, not truly predict it
 
-  ## Computational Complexity
+  During generation:
+  - We generate one token at a time
+  - By masking during training, the model learns to work with partial sequences
+  - This matches the generation scenario where future tokens don't exist yet
 
-  - Time: O(seq_len² × n_embd) - quadratic in sequence length
-  - Memory: O(seq_len² × n_head) for attention matrices
+  **Example: Predicting "cat"**
 
-  This is why long sequences are expensive and why alternatives like Mamba exist.
+      Sequence: "The cat sat"
+
+      When predicting "cat":
+      - Can attend to: "The" (position 0)
+      - Can attend to: "cat" (position 1, itself)
+      - Cannot attend to: "sat" (position 2, future)
+
+      This forces the model to predict "sat" using only ["The", "cat"]
 
   ## Parameters
 
-  - W_q: [n_embd, n_embd] - Query projection
-  - W_k: [n_embd, n_kv_head × head_dim] - Key projection
-  - W_v: [n_embd, n_kv_head × head_dim] - Value projection
-  - W_proj: [n_embd, n_embd] - Output projection
+  For n_embd = 768, n_head = 6:
 
-  Total parameters ≈ 4 × n_embd² (for standard MHA)
+  - Q projection: 768 × 768 = 589,824
+  - K projection: 768 × 768 = 589,824
+  - V projection: 768 × 768 = 589,824
+  - Output projection: 768 × 768 = 589,824
+  - **Total: ~2.4M parameters per attention layer**
+
+  ## Computational Complexity
+
+  **Time complexity: O(n² × d)**
+  - n = sequence length
+  - d = embedding dimension
+  - The bottleneck is the n² attention matrix
+
+  For seq_len = 1024, n_embd = 768:
+  - Attention matrix: 1024 × 1024 = 1M entries per head
+  - With 6 heads: 6M attention scores
+  - This is why long contexts are expensive!
+
+  **Space complexity: O(n² × h)**
+  - h = number of heads
+  - Must store attention weights for backpropagation
+  - Memory grows quadratically with sequence length
+
+  ## Attention Pattern Examples
+
+  Real attention patterns observed in trained models:
+
+  **Syntactic Head**: Subject-verb agreement
+  ```
+  "The cats [attend heavily to 'The'] are sleeping"
+  ```
+
+  **Positional Head**: Attends to previous token
+  ```
+  Each token attends strongly to the immediately preceding token
+  ```
+
+  **Long-range Head**: Discourse coherence
+  ```
+  "John went to the store. ... He [attends to 'John'] bought milk."
+  ```
+
+  **Semantic Head**: Entity relationships
+  ```
+  "Paris [attends to] is the capital of France [attends to]"
+  ```
+
+  ## Usage
+
+      # Single attention layer
+      input = Axon.input("tokens", shape: {nil, nil, 768})
+      output = CausalSelfAttention.layer(input, 768, 6, "attn")
+      # Output shape: [batch, seq_len, 768]
+
+      # In a transformer block
+      block = input
+        |> Axon.layer_norm()
+        |> CausalSelfAttention.layer(768, 6, "block-0.attn")
+        |> then(fn x -> Axon.add(input, x) end)  # Residual
+
+  ## Performance Considerations
+
+  **Memory optimizations:**
+  - Cache the causal mask (currently recreated each forward pass)
+  - Use flash attention for long sequences (when available)
+  - Consider sparse attention patterns for very long contexts
+
+  **Compute optimizations:**
+  - Fused attention kernels (combine multiple ops)
+  - Mixed precision (FP16 for attention scores)
+  - KV caching during generation (reuse previous key/value pairs)
+
+  ## Variants
+
+  This module implements standard causal self-attention. Other variants:
+
+  - **Multi-Query Attention (MQA)**: Share K, V across heads (faster inference)
+  - **Grouped-Query Attention (GQA)**: Groups of heads share K, V (LLaMA 2)
+  - **Flash Attention**: Memory-efficient implementation (2-4× faster)
+  - **Sparse Attention**: Only attend to subset of tokens (Longformer, BigBird)
+  - **Sliding Window**: Only attend to nearby tokens (local attention)
+
+  ## References
+
+  - Original attention: "Attention is All You Need" (Vaswani et al., 2017)
+  - GPT-2: "Language Models are Unsupervised Multitask Learners" (Radford et al., 2019)
+  - Causal masking: Essential for autoregressive models
+  - Multi-head benefits: "Analyzing Multi-Head Self-Attention" (Voita et al., 2019)
+  - Flash Attention: "Fast and Memory-Efficient Exact Attention" (Dao et al., 2022)
   """
 
   import Nx.Defn
 
   @doc """
-  Creates a causal self-attention layer.
+  Builds a complete causal self-attention layer.
+
+  This is the main entry point that orchestrates all attention operations:
+  1. Project input to Q, K, V
+  2. Split into multiple heads
+  3. Compute attention scores
+  4. Apply causal mask
+  5. Apply softmax
+  6. Apply attention to values
+  7. Merge heads
+  8. Final output projection
 
   ## Parameters
-    - input: Axon layer [batch, seq_len, n_embd]
-    - n_embd: Embedding dimension
-    - n_head: Number of attention heads
-    - name: Base name for the layer
+
+  - `input` - Input tensor [batch, seq_len, num_embed]
+  - `num_embed` - Embedding dimension (e.g., 768)
+  - `num_heads` - Number of attention heads (e.g., 6)
+  - `name` - Layer name prefix for all sub-layers
+
+  ## Returns
+
+  Output tensor with same shape as input: [batch, seq_len, num_embed]
+
+  ## Constraints
+
+  - `num_embed` must be divisible by `num_heads`
+  - Resulting `head_dim = num_embed / num_heads`
+  - Each head operates on `head_dim` dimensions independently
+
+  ## Example
+
+      # Create attention layer
+      input = Axon.input("x", shape: {nil, nil, 768})
+      output = CausalSelfAttention.layer(input, 768, 6, "attn-0")
+
+      # With 768 dimensions and 6 heads:
+      # - Each head sees 128 dimensions (768 / 6)
+      # - 6 parallel attention operations
+      # - Results concatenated back to 768 dimensions
+
+  ## Shape Flow
+
+      Input:  [8, 1024, 768]         # batch=8, seq=1024, embed=768
+        ↓
+      Q,K,V:  [8, 1024, 768] each
+        ↓
+      Split:  [8, 6, 1024, 128]      # 6 heads, 128 dims each
+        ↓
+      Scores: [8, 6, 1024, 1024]     # attention matrix per head
+        ↓
+      Masked: [8, 6, 1024, 1024]     # with causal mask applied
+        ↓
+      Weights:[8, 6, 1024, 1024]     # after softmax
+        ↓
+      Applied:[8, 6, 1024, 128]      # attended values
+        ↓
+      Merged: [8, 1024, 768]         # concatenate heads
+        ↓
+      Output: [8, 1024, 768]         # final projection
   """
   def layer(input, num_embed, num_heads, name) do
     head_dim = div(num_embed, num_heads)
