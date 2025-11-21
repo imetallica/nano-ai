@@ -24,6 +24,6 @@ defmodule NanoAi do
   end
 
   def explore(%Axon{} = model, template \\ {8, 1024}) do
-    Axon.Display.as_table(model, Nx.template(template, :bf16))
+    Axon.Display.as_table(model, Nx.template(template, :u32))
   end
 end

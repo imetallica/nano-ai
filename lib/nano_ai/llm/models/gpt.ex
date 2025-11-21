@@ -269,16 +269,16 @@ defmodule NanoAi.LLM.Models.GPT do
     "input-ids"
     |> Axon.input(shape: {nil, nil})
     |> then(fn input_ids ->
-      {input_ids, Axon.embedding(input_ids, opts[:vocab_size], opts[:num_embed], name: "token-embeddings")}
+      {input_ids, Axon.embedding(input_ids, opts[:vocab_size], opts[:num_embed])}
     end)
     |> then(fn {input_ids, embeddings} ->
       {input_ids, embeddings,
        (&positional_ids_fun/2)
-       |> Axon.layer([input_ids], name: "position-ids", op_name: :position_ids)
-       |> Axon.embedding(opts[:sequence_length], opts[:num_embed], name: "position-embeddings")}
+       |> Axon.layer([input_ids], op_name: :position_ids)
+       |> Axon.embedding(opts[:sequence_length], opts[:num_embed])}
     end)
     |> then(fn {_input_ids, token_embeddings, position_embeddings} ->
-      Axon.add(token_embeddings, position_embeddings, name: "embeddings")
+      Axon.add(token_embeddings, position_embeddings)
     end)
   end
 
@@ -320,16 +320,16 @@ defmodule NanoAi.LLM.Models.GPT do
   # - Pre-norm (default): More stable, used in GPT-3 and modern LLMs
   # - Post-norm: Original transformer, slightly better performance but harder to train
   defp transformer_blocks(input, opts) do
-    Enum.reduce(1..opts[:num_layers], input, fn layer_idx, input ->
+    Enum.reduce(1..opts[:num_layers], input, fn _, input ->
       case opts[:ffn_norm] do
         :pre_norm ->
-          Transformer.pre_norm(input, opts[:num_embed], opts[:num_heads], "pre-transformer-block-#{layer_idx - 1}",
+          Transformer.pre_norm(input, opts[:num_embed], opts[:num_heads],
             ffn_type: opts[:ffn_type],
             expand_factor: opts[:ffn_expand_factor]
           )
 
         :post_norm ->
-          Transformer.post_norm(input, opts[:num_embed], opts[:num_heads], "post-transformer-block-#{layer_idx - 1}",
+          Transformer.post_norm(input, opts[:num_embed], opts[:num_heads],
             ffn_type: opts[:ffn_type],
             expand_factor: opts[:ffn_expand_factor]
           )
@@ -348,7 +348,7 @@ defmodule NanoAi.LLM.Models.GPT do
   # - gamma (scale) and beta (shift) are learned parameters
   # - Helps prevent the output projection from receiving extreme values
   defp final_norm(input) do
-    Axon.layer_norm(input, name: "final-layer-norm")
+    Axon.layer_norm(input)
   end
 
   # Projects the final hidden states to vocabulary logits.
@@ -370,6 +370,6 @@ defmodule NanoAi.LLM.Models.GPT do
   #
   # During inference, logits at position i predict the next token (position i+1)
   defp output_projection(input, opts) do
-    Axon.dense(input, opts[:vocab_size], use_bias: false, name: "output-head")
+    Axon.dense(input, opts[:vocab_size], use_bias: false)
   end
 end

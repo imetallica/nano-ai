@@ -184,7 +184,7 @@ defmodule NanoAi.LLM.Trainer do
 
     with {:ok, contents} <- File.read(path) do
       %{params: model, datetime: datetime, nx_version: nx_version} = Nx.deserialize(contents)
-      Logger.info("Loaded model saved in #{datetime} with Nx version #{nx_version}.")
+      Logger.info("Loaded model saved at #{datetime} with Nx version #{nx_version}.")
       {:ok, model}
     end
   end

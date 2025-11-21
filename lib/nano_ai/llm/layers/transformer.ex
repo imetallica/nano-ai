@@ -274,16 +274,15 @@ defmodule NanoAi.LLM.Layers.Transformer do
           input :: Axon.t(),
           num_embed :: integer(),
           num_heads :: integer(),
-          name :: String.t(),
           opts :: keyword()
         ) :: Axon.t()
-  def pre_norm(input, num_embed, num_heads, name, opts \\ []) do
+  def pre_norm(input, num_embed, num_heads, opts \\ []) do
     ffn_type = Keyword.get(opts, :ffn_type, :gelu)
     expand_factor = Keyword.get(opts, :expand_factor, 4)
 
     input
-    |> pre_norm_attention_sublayer(num_embed, num_heads, name)
-    |> pre_norm_ffn_sublayer(num_embed, name, ffn_type, expand_factor)
+    |> pre_norm_attention_sublayer(num_embed, num_heads)
+    |> pre_norm_ffn_sublayer(num_embed, ffn_type, expand_factor)
   end
 
   @doc """
@@ -362,77 +361,74 @@ defmodule NanoAi.LLM.Layers.Transformer do
           input :: Axon.t(),
           num_embed :: integer(),
           num_heads :: integer(),
-          name :: String.t(),
           opts :: keyword()
         ) :: Axon.t()
-  def post_norm(input, num_embed, num_heads, name, opts \\ []) do
+  def post_norm(input, num_embed, num_heads, opts \\ []) do
     ffn_type = Keyword.get(opts, :ffn_type, :gelu)
     expand_factor = Keyword.get(opts, :expand_factor, 4)
 
     input
-    |> post_norm_attention_sublayer(num_embed, num_heads, name)
-    |> post_norm_ffn_sublayer(num_embed, name, ffn_type, expand_factor)
+    |> post_norm_attention_sublayer(num_embed, num_heads)
+    |> post_norm_ffn_sublayer(num_embed, ffn_type, expand_factor)
   end
 
-  defp pre_norm_attention_sublayer(input, num_embed, num_heads, name) do
+  defp pre_norm_attention_sublayer(input, num_embed, num_heads) do
     input
-    |> Axon.layer_norm(name: "#{name}.attn-norm")
+    |> Axon.layer_norm()
     |> CausalSelfAttention.layer(
       num_embed,
-      num_heads,
-      "#{name}.attn"
+      num_heads
     )
     |> then(fn x ->
-      Axon.add(input, x, name: "#{name}.attn-residual")
+      Axon.add(input, x)
     end)
   end
 
-  defp pre_norm_ffn_sublayer(input, num_embed, name, ffn_type, expand_factor) do
+  defp pre_norm_ffn_sublayer(input, num_embed, ffn_type, expand_factor) do
     input
-    |> Axon.layer_norm(name: "#{name}.ffn-norm")
-    |> apply_ffn(num_embed, "#{name}.ffn", ffn_type, expand_factor)
+    |> Axon.layer_norm()
+    |> apply_ffn(num_embed, ffn_type, expand_factor)
     |> then(fn y ->
-      Axon.add(input, y, name: "#{name}.ffn-residual")
+      Axon.add(input, y)
     end)
   end
 
-  defp post_norm_attention_sublayer(input, num_embed, num_heads, name) do
+  defp post_norm_attention_sublayer(input, num_embed, num_heads) do
     input
     |> CausalSelfAttention.layer(
       num_embed,
-      num_heads,
-      "#{name}.attn"
+      num_heads
     )
     |> then(fn attn_output ->
       input
-      |> Axon.add(attn_output, name: "#{name}.attn-residual")
-      |> Axon.layer_norm(name: "#{name}.attn-norm")
+      |> Axon.add(attn_output)
+      |> Axon.layer_norm()
     end)
   end
 
-  defp post_norm_ffn_sublayer(input, num_embed, name, ffn_type, expand_factor) do
+  defp post_norm_ffn_sublayer(input, num_embed, ffn_type, expand_factor) do
     input
-    |> apply_ffn(num_embed, "#{name}.ffn", ffn_type, expand_factor)
+    |> apply_ffn(num_embed, ffn_type, expand_factor)
     |> then(fn ffn_output ->
       input
-      |> Axon.add(ffn_output, name: "#{name}.ffn-residual")
-      |> Axon.layer_norm(name: "#{name}.ffn-norm")
+      |> Axon.add(ffn_output)
+      |> Axon.layer_norm()
     end)
   end
 
-  defp apply_ffn(input, n_embed, name, ffn_type, expand_factor) do
+  defp apply_ffn(input, n_embed, ffn_type, expand_factor) do
     case ffn_type do
       :gelu ->
-        FeedForward.gelu(input, n_embed, name, expand_factor: expand_factor)
+        FeedForward.gelu(input, n_embed, expand_factor: expand_factor)
 
       :reglu ->
-        FeedForward.reglu(input, n_embed, name, expand_factor: expand_factor)
+        FeedForward.reglu(input, n_embed, expand_factor: expand_factor)
 
       :geglu ->
-        FeedForward.geglu(input, n_embed, name, expand_factor: expand_factor)
+        FeedForward.geglu(input, n_embed, expand_factor: expand_factor)
 
       :siglu ->
-        FeedForward.siglu(input, n_embed, name, expand_factor: expand_factor)
+        FeedForward.siglu(input, n_embed, expand_factor: expand_factor)
     end
   end
 end

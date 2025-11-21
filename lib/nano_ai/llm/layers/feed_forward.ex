@@ -276,16 +276,15 @@ defmodule NanoAi.LLM.Layers.FeedForward do
   @spec gelu(
           input :: Axon.t(),
           n_embed :: integer(),
-          name :: String.t(),
           opts :: keyword()
         ) :: Axon.t()
-  def gelu(input, n_embed, name, opts \\ [expand_factor: 4]) do
+  def gelu(input, n_embed, opts \\ [expand_factor: 4]) do
     hidden_size = n_embed * opts[:expand_factor]
 
     input
-    |> up_projection(hidden_size, "#{name}.gelu")
-    |> activation_layer(:gelu, name)
-    |> down_projection(n_embed, "#{name}.gelu")
+    |> up_projection(hidden_size)
+    |> activation_layer(:gelu)
+    |> down_projection(n_embed)
   end
 
   @doc """
@@ -356,20 +355,16 @@ defmodule NanoAi.LLM.Layers.FeedForward do
   @spec siglu(
           input :: Axon.t(),
           n_embed :: integer(),
-          name :: String.t(),
           opts :: keyword()
         ) :: Axon.t()
-  def siglu(input, n_embed, name, opts \\ [expand_factor: 4]) do
+  def siglu(input, n_embed, opts \\ [expand_factor: 4]) do
     hidden_size = n_embed * opts[:expand_factor]
 
     input
-    |> gate_projection(hidden_size, name)
-    |> activation_layer(:silu, name)
-    |> Axon.multiply(
-      up_projection(input, hidden_size, name),
-      name: "#{name}.siglu"
-    )
-    |> down_projection(n_embed, "#{name}.siglu")
+    |> gate_projection(hidden_size)
+    |> activation_layer(:silu)
+    |> Axon.multiply(up_projection(input, hidden_size))
+    |> down_projection(n_embed)
   end
 
   @doc """
@@ -432,20 +427,16 @@ defmodule NanoAi.LLM.Layers.FeedForward do
   @spec reglu(
           input :: Axon.t(),
           n_embed :: integer(),
-          name :: String.t(),
           opts :: keyword()
         ) :: Axon.t()
-  def reglu(input, n_embed, name, opts \\ [expand_factor: 4]) do
+  def reglu(input, n_embed, opts \\ [expand_factor: 4]) do
     hidden_size = n_embed * opts[:expand_factor]
 
     input
-    |> gate_projection(hidden_size, name)
-    |> activation_layer(:relu, name)
-    |> Axon.multiply(
-      up_projection(input, hidden_size, name),
-      name: "#{name}.reglu"
-    )
-    |> down_projection(n_embed, "#{name}.reglu")
+    |> gate_projection(hidden_size)
+    |> activation_layer(:relu)
+    |> Axon.multiply(up_projection(input, hidden_size))
+    |> down_projection(n_embed)
   end
 
   @doc """
@@ -523,39 +514,35 @@ defmodule NanoAi.LLM.Layers.FeedForward do
   @spec geglu(
           input :: Axon.t(),
           n_embed :: integer(),
-          name :: String.t(),
           opts :: keyword()
         ) :: Axon.t()
-  def geglu(input, n_embed, name, opts \\ [expand_factor: 4]) do
+  def geglu(input, n_embed, opts \\ [expand_factor: 4]) do
     hidden_size = n_embed * opts[:expand_factor]
 
     input
-    |> gate_projection(hidden_size, name)
-    |> activation_layer(:gelu, name)
-    |> Axon.multiply(
-      up_projection(input, hidden_size, name),
-      name: "#{name}.geglu"
-    )
-    |> down_projection(n_embed, "#{name}.geglu")
+    |> gate_projection(hidden_size)
+    |> activation_layer(:gelu)
+    |> Axon.multiply(up_projection(input, hidden_size))
+    |> down_projection(n_embed)
   end
 
-  defp gate_projection(input, hidden_size, name) do
-    Axon.dense(input, hidden_size, use_bias: false, name: "#{name}.gate")
+  defp gate_projection(input, hidden_size) do
+    Axon.dense(input, hidden_size, use_bias: false)
   end
 
-  defp up_projection(input, hidden_size, name) do
-    Axon.dense(input, hidden_size, use_bias: false, name: "#{name}.up")
+  defp up_projection(input, hidden_size) do
+    Axon.dense(input, hidden_size, use_bias: false)
   end
 
-  defp activation_layer(input, activation, name) do
+  defp activation_layer(input, activation) do
     case activation do
-      :gelu -> Axon.gelu(input, name: "#{name}.activation.gelu")
-      :silu -> Axon.silu(input, name: "#{name}.activation.silu")
-      :relu -> Axon.relu(input, name: "#{name}.activation.relu")
+      :gelu -> Axon.gelu(input)
+      :silu -> Axon.silu(input)
+      :relu -> Axon.relu(input)
     end
   end
 
-  defp down_projection(input, num_embed, name) do
-    Axon.dense(input, num_embed, use_bias: false, name: "#{name}.down")
+  defp down_projection(input, num_embed) do
+    Axon.dense(input, num_embed, use_bias: false)
   end
 end

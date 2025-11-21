@@ -330,40 +330,38 @@ defmodule NanoAi.LLM.Layers.CausalSelfAttention do
         ↓
       Output: [8, 1024, 768]         # final projection
   """
-  def layer(input, num_embed, num_heads, name) do
+  def layer(input, num_embed, num_heads) do
     head_dim = div(num_embed, num_heads)
 
-    {q, k, v} = project_qkv(input, num_embed, name)
-    q = split_heads(q, num_heads, head_dim, name)
-    k = split_heads(k, num_heads, head_dim, name)
-    v = split_heads(v, num_heads, head_dim, name)
-    scores = compute_attention_scores(q, k, head_dim, name)
-    masked_scores = apply_causal_mask(scores, name)
+    {q, k, v} = project_qkv(input, num_embed)
+    q = split_heads(q, num_heads, head_dim)
+    k = split_heads(k, num_heads, head_dim)
+    v = split_heads(v, num_heads, head_dim)
+    scores = compute_attention_scores(q, k, head_dim)
+    masked_scores = apply_causal_mask(scores)
 
-    attention_weights = apply_softmax(masked_scores, name)
-    attention_output = apply_attention_weights(attention_weights, v, name)
-    merged_output = merge_heads(attention_output, name)
-    final_projection(merged_output, num_embed, name)
+    attention_weights = apply_softmax(masked_scores)
+    attention_output = apply_attention_weights(attention_weights, v)
+    merged_output = merge_heads(attention_output)
+    final_projection(merged_output, num_embed)
   end
 
   # Step 1: Linear projections for Q, K, V
-  defp project_qkv(input, num_embed, name) do
+  defp project_qkv(input, num_embed) do
     # Implement linear projections for Q, K, V
-    q = Axon.dense(input, num_embed, use_bias: false, name: "#{name}.q-proj")
-    k = Axon.dense(input, num_embed, use_bias: false, name: "#{name}.k-proj")
-    v = Axon.dense(input, num_embed, use_bias: false, name: "#{name}.v-proj")
-
+    q = Axon.dense(input, num_embed, use_bias: false)
+    k = Axon.dense(input, num_embed, use_bias: false)
+    v = Axon.dense(input, num_embed, use_bias: false)
     {q, k, v}
   end
 
   # Step 2: Split heads
-  defp split_heads(x, num_heads, head_dim, name) do
+  defp split_heads(x, num_heads, head_dim) do
     Axon.layer(
       fn x, _opts ->
         split_heads_fn(x, num_heads, head_dim)
       end,
       [x],
-      name: "#{name}.split-heads",
       op_name: :split_heads
     )
   end
@@ -377,13 +375,12 @@ defmodule NanoAi.LLM.Layers.CausalSelfAttention do
   end
 
   # Step 3: Compute attention scores
-  defp compute_attention_scores(q, k, head_dim, name) do
+  defp compute_attention_scores(q, k, head_dim) do
     Axon.layer(
       fn q, k, _opts ->
         compute_attention_scores_fn(q, k, head_dim)
       end,
       [q, k],
-      name: "#{name}.attention-scores",
       op_name: :attention_scores
     )
   end
@@ -403,11 +400,10 @@ defmodule NanoAi.LLM.Layers.CausalSelfAttention do
 
   # Step 4: Apply causal mask
   # TODO OPTIMIZATION: Cache the mask to avoid recreation on every batch
-  defp apply_causal_mask(scores, name) do
+  defp apply_causal_mask(scores) do
     Axon.layer(
       &apply_causal_mask_fn/2,
       [scores],
-      name: "#{name}.causal-mask",
       op_name: :causal_mask
     )
   end
@@ -431,16 +427,15 @@ defmodule NanoAi.LLM.Layers.CausalSelfAttention do
   end
 
   # Step 5: Apply softmax to get attention weights
-  defp apply_softmax(masked_scores, name) do
-    Axon.softmax(masked_scores, axis: -1, name: "#{name}.softmax", op_name: :softmax)
+  defp apply_softmax(masked_scores) do
+    Axon.softmax(masked_scores, axis: -1, op_name: :softmax)
   end
 
   # Step 6: Apply attention weights to values
-  defp apply_attention_weights(attention_weights, v, name) do
+  defp apply_attention_weights(attention_weights, v) do
     Axon.layer(
       &apply_attention_weights_fn/3,
       [attention_weights, v],
-      name: "#{name}.apply-attention",
       op_name: :apply_attention
     )
   end
@@ -454,11 +449,10 @@ defmodule NanoAi.LLM.Layers.CausalSelfAttention do
   end
 
   # Step 7: Combine heads and project output
-  defp merge_heads(attention_output, name) do
+  defp merge_heads(attention_output) do
     Axon.layer(
       &merge_heads_fn/2,
       [attention_output],
-      name: "#{name}.merge-heads",
       op_name: :merge_heads
     )
   end
@@ -476,7 +470,7 @@ defmodule NanoAi.LLM.Layers.CausalSelfAttention do
     |> Nx.reshape({batch_size, seq_len, n_head * head_dim})
   end
 
-  defp final_projection(merged_output, num_embed, name) do
-    Axon.dense(merged_output, num_embed, use_bias: false, name: "#{name}.out-proj")
+  defp final_projection(merged_output, num_embed) do
+    Axon.dense(merged_output, num_embed, use_bias: false)
   end
 end
