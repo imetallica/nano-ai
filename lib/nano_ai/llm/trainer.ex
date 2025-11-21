@@ -120,9 +120,8 @@ defmodule NanoAi.LLM.Trainer do
     - :optimizer - Optimizer to use. Default: :adamw
     - :loss - Loss function. Default: :cross_entropy
     - :weight_decay - AdamW weight decay. Default: 0.1
-    - :warmup_steps - LR warmup steps. Default: 100
     - :max_grad_norm - Gradient clipping. Default: 1.0
-    - :log_every - Log metrics every N steps. Default: 100
+    - :log_every - Log metrics every N steps. Default: 1
     - :checkpoint_every - Save model every N steps. Default: 100
   """
   def train(model, train_data, opts \\ []) do
@@ -150,6 +149,8 @@ defmodule NanoAi.LLM.Trainer do
     - opts: Training options
   """
   def resume(model, train_data, state_path, opts \\ []) do
+    Logger.info("Resuming from checkpoint: #{state_path}.")
+
     epochs = Keyword.get(opts, :epochs, 1)
     log_every = Keyword.get(opts, :log_every, 100)
     checkpoint_every = Keyword.get(opts, :checkpoint_every, 100)
@@ -250,8 +251,10 @@ defmodule NanoAi.LLM.Trainer do
   defp log_message(%State{metrics: metrics} = state) do
     # Log memory usage if available
     memory_info = get_memory_info()
+    loss = Float.round(Nx.to_number(metrics["loss"]), 5)
+    perplexity = Float.round(Nx.to_number(Nx.exp(metrics["loss"])), 5)
 
-    "\n[Training] Step #{state.iteration}, Epoch #{state.epoch}, Loss: #{Nx.to_number(metrics["loss"])} | Memory: #{memory_info}"
+    "\n[Training] Epoch #{state.epoch}, Step #{state.iteration}, Loss: #{loss}, Perplexity: #{perplexity} | Memory: [#{memory_info}]"
   end
 
   defp get_memory_info do
