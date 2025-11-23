@@ -128,6 +128,7 @@ defmodule NanoAi.LLM.Trainer do
     epochs = Keyword.get(opts, :epochs, 1)
     log_every = Keyword.get(opts, :log_every, 1)
     checkpoint_every = Keyword.get(opts, :checkpoint_every, 100)
+    iterations = Keyword.get(opts, :iterations, -1)
 
     optimizer = build_optimizer(opts)
     loss = build_loss(opts)
@@ -136,7 +137,12 @@ defmodule NanoAi.LLM.Trainer do
     |> Loop.trainer(loss, optimizer)
     |> Loop.log(&log_message/1, event: :iteration_completed, filter: [every: log_every])
     |> Loop.checkpoint(event: :iteration_completed, filter: [every: checkpoint_every], path: @checkpoint_path)
-    |> Loop.run(train_data, %{}, epochs: epochs, garbage_collect: true, force_garbage_collection?: true)
+    |> Loop.run(train_data, %{},
+      epochs: epochs,
+      iterations: iterations,
+      garbage_collect: true,
+      force_garbage_collection?: true
+    )
   end
 
   @doc """
@@ -154,6 +160,7 @@ defmodule NanoAi.LLM.Trainer do
     epochs = Keyword.get(opts, :epochs, 1)
     log_every = Keyword.get(opts, :log_every, 100)
     checkpoint_every = Keyword.get(opts, :checkpoint_every, 100)
+    iterations = Keyword.get(opts, :iterations, -1)
 
     optimizer = build_optimizer(opts)
     loss = build_loss(opts)
@@ -165,13 +172,22 @@ defmodule NanoAi.LLM.Trainer do
     |> Loop.log(&log_message/1, event: :iteration_completed, filter: [every: log_every])
     |> Loop.checkpoint(event: :iteration_completed, filter: [every: checkpoint_every], path: @checkpoint_path)
     |> Loop.from_state(state)
-    |> Loop.run(train_data, %{}, epochs: epochs, garbage_collect: true, force_garbage_collection?: true)
+    |> Loop.run(train_data, %{},
+      epochs: epochs,
+      iterations: iterations,
+      garbage_collect: true,
+      force_garbage_collection?: true
+    )
   end
 
   def save(model, name, _opts \\ []) do
     path = Path.join([@trained_models_path, "#{name}.axon"])
 
-    %{params: model, datetime: DateTime.utc_now(), nx_version: to_string(Application.spec(:nx, :vsn))}
+    %{
+      params: model,
+      datetime: DateTime.to_unix(DateTime.utc_now()),
+      nx_version: :erlang.phash2(Application.spec(:nx, :vsn))
+    }
     |> Nx.serialize()
     |> then(&File.write(path, &1))
     |> tap(fn _ ->
@@ -184,12 +200,12 @@ defmodule NanoAi.LLM.Trainer do
 
     with {:ok, contents} <- File.read(path) do
       %{params: model, datetime: datetime, nx_version: nx_version} = Nx.deserialize(contents)
-      Logger.info("Loaded model saved at #{datetime} with Nx version #{nx_version}.")
+      Logger.info("Loaded model saved at #{name}.")
       {:ok, model}
     end
   end
 
-  defp build_optimizer(opts) do
+  def build_optimizer(opts \\ []) do
     optimizer_type = Keyword.get(opts, :optimizer, :adamw)
     learning_rate = Keyword.get(opts, :learning_rate, 3.0e-4)
     weight_decay = Keyword.get(opts, :weight_decay, 0.1)
@@ -216,7 +232,7 @@ defmodule NanoAi.LLM.Trainer do
     )
   end
 
-  defp build_loss(opts) do
+  def build_loss(opts \\ []) do
     loss_type = Keyword.get(opts, :loss, :cross_entropy)
 
     case loss_type do

@@ -10,6 +10,8 @@ defmodule NanoAi.Tokenizer do
   alias Tokenizers.Tokenizer
   alias Tokenizers.Trainer
 
+  require Nx
+
   @pad "<|pad|>"
   @sequence_length Application.compile_env(:nano_ai, __MODULE__)[:sequence_length]
   @special_tokens Application.compile_env(:nano_ai, __MODULE__)[:special_tokens]
@@ -26,6 +28,33 @@ defmodule NanoAi.Tokenizer do
 
   def load(path \\ @tk_file_path) when is_binary(path) do
     Tokenizer.from_file(path)
+  end
+
+  def fetch_token_id(token) when is_binary(token) do
+    with {:ok, %Tokenizer{} = tokenizer} <- load() do
+      id = Tokenizer.token_to_id(tokenizer, token)
+      if is_nil(id), do: {:error, :token_not_found}, else: {:ok, id}
+    end
+  end
+
+  @doc """
+  Decodes token IDs back into text using the default tokenizer.
+  """
+  @spec decode(ids_or_tensor :: [integer(), ...] | Nx.Tensor.t()) ::
+          {:error, term()} | {:ok, String.t()}
+  def decode(ids_or_tensor) when is_list(ids_or_tensor) or Nx.is_tensor(ids_or_tensor) do
+    with {:ok, %Tokenizer{} = tokenizer} <- load() do
+      cond do
+        is_list(ids_or_tensor) ->
+          Tokenizer.decode(tokenizer, ids_or_tensor)
+
+        Nx.is_tensor(ids_or_tensor) and Nx.shape(ids_or_tensor) == {} ->
+          Tokenizer.decode(tokenizer, [Nx.to_number(ids_or_tensor)])
+
+        Nx.is_tensor(ids_or_tensor) ->
+          Tokenizer.decode(tokenizer, Nx.to_list(ids_or_tensor))
+      end
+    end
   end
 
   @doc """

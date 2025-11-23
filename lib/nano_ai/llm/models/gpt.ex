@@ -199,14 +199,30 @@ defmodule NanoAi.LLM.Models.GPT do
   - GPT-3 Paper: "Language Models are Few-Shot Learners"
   - Attention Paper: "Attention is All You Need"
   """
+
   import Nx.Defn
 
+  alias NanoAi.LLM.Layers.Embedding
   alias NanoAi.LLM.Layers.Transformer
+  alias NanoAi.Tokenizer
+  alias Nx.Serving
 
   @config Application.compile_env(:nano_ai, __MODULE__)
 
   @spec build(opts :: keyword()) :: Axon.t()
   def build(opts \\ @config) do
+    opts =
+      Keyword.validate!(opts, [
+        :vocab_size,
+        :sequence_length,
+        :num_layers,
+        :num_heads,
+        :num_embed,
+        :ffn_expand_factor,
+        :ffn_norm,
+        :ffn_type
+      ])
+
     opts
     |> embeddings()
     |> transformer_blocks(opts)
@@ -215,87 +231,81 @@ defmodule NanoAi.LLM.Models.GPT do
   end
 
   @doc """
-  Builds the embedding layer for the GPT model.
-
-  This layer converts token IDs into dense vector representations by combining
-  token embeddings and positional embeddings.
-
-  ## Process
-
-  1. **Token Embeddings**: Maps each token ID (0 to vocab_size-1) to a learned
-     num_embed-dimensional vector. This captures semantic information about each token.
-
-  2. **Position Embeddings**: Generates position indices [0, 1, 2, ..., seq_len-1]
-     and maps them to learned vectors. This tells the model the order of tokens.
-
-  3. **Combination**: Adds token and position embeddings element-wise.
-
-  ## Why Position Embeddings?
-
-  Transformers process all tokens in parallel, so they have no inherent sense of order.
-  Without position information:
-  - "The cat sat on the mat" = "mat the on sat cat The" (just a set of tokens)
-
-  Position embeddings encode sequence order:
-  - Token "The" at position 0 gets one positional vector
-  - Token "cat" at position 1 gets a different positional vector
-  - The model learns that position matters for meaning
-
-  ## Shapes
-
-      Input: token IDs [batch, seq_len] (integers)
-      ↓
-      Token embeddings: [batch, seq_len, num_embed] (floats)
-      Position embeddings: [batch, seq_len, num_embed] (floats)
-      ↓
-      Output: [batch, seq_len, num_embed] (sum of both)
+  Creates an Nx.Serving for next token generation.
 
   ## Parameters
+    - model: Axon model
+    - params: Trained model parameters
+    - opts: Generation options
 
-  - `opts` - Configuration options (defaults to module config)
-    - `:vocab_size` - Size of token vocabulary (65,536)
-    - `:num_embed` - Embedding dimension (768)
-    - `:sequence_length` - Maximum sequence length (1,024)
-
-  ## Example
-
-      iex> model = embeddings()
-      iex> {init_fn, predict_fn} = Axon.build(model)
-      iex> input_ids = Nx.tensor([[1, 2, 3, 4, 5]])  # [1, 5]
-      iex> params = init_fn.(input_ids, %{})
-      iex> embeddings = predict_fn.(params, input_ids)  # [1, 5, 768]
+  ## Options
+    - :temperature - Sampling temperature. Default: 1.0
   """
-  def embeddings(opts \\ @config) do
-    "input-ids"
-    |> Axon.input(shape: {nil, nil})
-    |> then(fn input_ids ->
-      {input_ids, Axon.embedding(input_ids, opts[:vocab_size], opts[:num_embed])}
-    end)
-    |> then(fn {input_ids, embeddings} ->
-      {input_ids, embeddings,
-       (&positional_ids_fun/2)
-       |> Axon.layer([input_ids], op_name: :position_ids)
-       |> Axon.embedding(opts[:sequence_length], opts[:num_embed])}
-    end)
-    |> then(fn {_input_ids, token_embeddings, position_embeddings} ->
-      Axon.add(token_embeddings, position_embeddings)
+  def serving(params \\ %{}, opts \\ []) do
+    # Build the model once
+    {_init_fn, predict_fn} = Axon.build(build(), mode: :inference)
+
+    fn _defn_opts ->
+      fn input_ids ->
+        predict_fn.(params, input_ids)
+      end
+    end
+    |> Serving.new()
+    |> Serving.client_preprocessing(&preprocess/1)
+    |> Serving.client_postprocessing(&postprocess/2)
+  end
+
+  defp preprocess({input, temperature}) do
+    with {:ok, %{ids: input_ids}} <- Tokenizer.encode(input) do
+      input_ids_tensor = Nx.from_binary(input_ids, :u32)
+      {Nx.Batch.stack([input_ids_tensor]), {temperature}}
+    end
+  end
+
+  defp postprocess({output, _}, {temperature}) do
+    output
+    |> apply_temperature(temperature)
+    |> sample_from_logits(System.unique_integer())
+    |> then(fn token_id_tensor ->
+      case Tokenizer.decode(token_id_tensor) do
+        {:ok, token} -> token
+        {:error, _} -> ""
+      end
     end)
   end
 
-  # Generates positional indices for the input sequence.
-  #
-  # Creates a tensor of sequential integers [0, 1, 2, ..., seq_len-1] that will be
-  # used to look up position embeddings.
-  #
-  # Parameters:
-  # - input_tensor: Input token IDs [batch, seq_len]
-  # - _opts: Options (unused, for compatibility with Axon.layer)
-  #
-  # Returns: Position indices tensor [1, seq_len] containing [0, 1, 2, ..., seq_len-1]
-  defnp positional_ids_fun(input_tensor, _opts) do
-    {_, seq_len} = Nx.shape(input_tensor)
+  defnp apply_temperature(logits, temperature) do
+    if temperature == 1.0 do
+      logits
+    else
+      logits / temperature
+    end
+  end
 
-    Nx.iota({1, seq_len}, axis: 1)
+  defnp sample_from_logits(logits, seed) do
+    logits = logits[0][-1]
+    probs = stable_softmax(logits)
+    key = Nx.Random.key(Nx.as_type(seed, :s64))
+    {sampled, _key} = Nx.Random.choice(key, Nx.iota(Nx.shape(logits)), probs, samples: 1)
+    sampled[0]
+  end
+
+  defnp softmax(logits) do
+    logits |> Nx.exp() |> then(&(&1 / Nx.sum(&1)))
+  end
+
+  defnp stable_softmax(logits) do
+    logits |> Nx.reduce_max() |> then(&Nx.subtract(logits, &1)) |> softmax()
+  end
+
+  defp embeddings(opts) do
+    embedding_opts = [
+      vocab_size: opts[:vocab_size],
+      num_embed: opts[:num_embed],
+      sequence_length: opts[:sequence_length]
+    ]
+
+    Embedding.positional(embedding_opts)
   end
 
   # Stacks multiple transformer blocks to build the deep network.

@@ -11,7 +11,7 @@ config :nano_ai, NanoAi.LLM.Models.GPT,
   num_layers: 12,
   num_heads: 6,
   # MQA heads for Multi-Query Attention
-  num_key_value_heads: 6,
+  # num_key_value_heads: 6,
   num_embed: 768,
   ffn_norm: :pre_norm,
   ffn_expand_factor: 4,
