@@ -15,7 +15,9 @@ config :nano_ai, NanoAi.LLM.Models.GPT,
   num_embed: 768,
   ffn_norm: :pre_norm,
   ffn_expand_factor: 4,
-  ffn_type: :gelu
+  ffn_type: :gelu,
+  use_mix_precision: true,
+  mix_precision_dtype: :bf16
 
 config :nano_ai, NanoAi.Tokenizer,
   vocab_size: vocab_size,

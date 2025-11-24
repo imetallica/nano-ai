@@ -220,7 +220,9 @@ defmodule NanoAi.LLM.Models.GPT do
         :num_embed,
         :ffn_expand_factor,
         :ffn_norm,
-        :ffn_type
+        :ffn_type,
+        use_mix_precision: false,
+        mix_precision_dtype: :bf16
       ])
 
     opts
@@ -228,6 +230,21 @@ defmodule NanoAi.LLM.Models.GPT do
     |> transformer_blocks(opts)
     |> final_norm()
     |> output_projection(opts)
+    |> then(fn model ->
+      if opts[:use_mix_precision] do
+        Axon.MixedPrecision.apply_policy(
+          model,
+          Axon.MixedPrecision.create_policy(
+            params: :f32,
+            compute: opts[:mix_precision_dtype],
+            output: :f32
+          ),
+          except: [:layer_norm]
+        )
+      else
+        model
+      end
+    end)
   end
 
   @doc """
