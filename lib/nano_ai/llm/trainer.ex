@@ -205,34 +205,49 @@ defmodule NanoAi.LLM.Trainer do
     end
   end
 
-  def build_optimizer(opts \\ []) do
-    optimizer_type = Keyword.get(opts, :optimizer, :adamw)
-    learning_rate = Keyword.get(opts, :learning_rate, 3.0e-4)
-    weight_decay = Keyword.get(opts, :weight_decay, 0.1)
-    max_grad_norm = Keyword.get(opts, :max_grad_norm, 1.0)
+  defp build_optimizer(opts) do
+    opts =
+      Keyword.validate!(opts,
+        optimizer: :adamw,
+        learning_rate: 3.0e-4,
+        weight_decay: 0.1,
+        max_grad_norm: 1.0,
+        warmup_steps: 1_000,
+        decay_steps: 10_000,
+        min_learning_rate_ratio: 0.1,
+        use_learning_rate_schedule: true
+      )
+
+    learning_rate =
+      if opts[:use_learning_rate_schedule] do
+        Polaris.Schedules.linear_decay(
+          opts[:learning_rate],
+          warmup: opts[:warmup_steps],
+          steps: opts[:decay_steps]
+        )
+      else
+        opts[:learning_rate]
+      end
 
     optimizer =
-      case optimizer_type do
+      case opts[:optimizer] do
         :adamw ->
-          Optimizers.adamw(learning_rate: learning_rate, decay: weight_decay)
+          Optimizers.adamw(learning_rate: learning_rate, decay: opts[:weight_decay])
 
         :adam ->
           Optimizers.adam(learning_rate: learning_rate)
 
         :sgd ->
           Optimizers.sgd(learning_rate: learning_rate)
-
-        custom when is_function(custom) ->
-          custom
       end
 
     Polaris.Updates.compose(
-      Polaris.Updates.clip_by_global_norm(max_norm: max_grad_norm),
+      Polaris.Updates.clip_by_global_norm(max_norm: opts[:max_grad_norm]),
       optimizer
     )
   end
 
-  def build_loss(opts \\ []) do
+  defp build_loss(opts) do
     loss_type = Keyword.get(opts, :loss, :cross_entropy)
 
     case loss_type do
