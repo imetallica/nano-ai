@@ -199,7 +199,7 @@ defmodule NanoAi.LLM.Trainer do
     path = Path.join([@trained_models_path, "#{name}.axon"])
 
     with {:ok, contents} <- File.read(path) do
-      %{params: model, datetime: datetime, nx_version: nx_version} = Nx.deserialize(contents)
+      %{params: model} = Nx.deserialize(contents)
       Logger.info("Loaded model saved at #{name}.")
       {:ok, model}
     end
