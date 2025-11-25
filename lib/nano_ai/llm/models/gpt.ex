@@ -221,6 +221,7 @@ defmodule NanoAi.LLM.Models.GPT do
         :ffn_expand_factor,
         :ffn_norm,
         :ffn_type,
+        dropout_rate: 0.0,
         use_mix_precision: false,
         mix_precision_dtype: :bf16
       ])
@@ -352,13 +353,15 @@ defmodule NanoAi.LLM.Models.GPT do
         :pre_norm ->
           Transformer.pre_norm(input, opts[:num_embed], opts[:num_heads],
             ffn_type: opts[:ffn_type],
-            expand_factor: opts[:ffn_expand_factor]
+            expand_factor: opts[:ffn_expand_factor],
+            dropout_rate: opts[:dropout_rate]
           )
 
         :post_norm ->
           Transformer.post_norm(input, opts[:num_embed], opts[:num_heads],
             ffn_type: opts[:ffn_type],
-            expand_factor: opts[:ffn_expand_factor]
+            expand_factor: opts[:ffn_expand_factor],
+            dropout_rate: opts[:dropout_rate]
           )
       end
     end)

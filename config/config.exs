@@ -16,6 +16,7 @@ config :nano_ai, NanoAi.LLM.Models.GPT,
   ffn_norm: :pre_norm,
   ffn_expand_factor: 4,
   ffn_type: :gelu,
+  dropout_rate: 0.1,
   use_mix_precision: true,
   mix_precision_dtype: :bf16
 

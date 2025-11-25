@@ -277,12 +277,11 @@ defmodule NanoAi.LLM.Layers.Transformer do
           opts :: keyword()
         ) :: Axon.t()
   def pre_norm(input, num_embed, num_heads, opts \\ []) do
-    ffn_type = Keyword.get(opts, :ffn_type, :gelu)
-    expand_factor = Keyword.get(opts, :expand_factor, 4)
+    opts = Keyword.validate!(opts, ffn_type: :gelu, expand_factor: 4, dropout_rate: 0.0)
 
     input
-    |> pre_norm_attention_sublayer(num_embed, num_heads)
-    |> pre_norm_ffn_sublayer(num_embed, ffn_type, expand_factor)
+    |> pre_norm_attention_sublayer(num_embed, num_heads, opts[:dropout_rate])
+    |> pre_norm_ffn_sublayer(num_embed, opts[:ffn_type], opts[:expand_factor], opts[:dropout_rate])
   end
 
   @doc """
@@ -364,41 +363,36 @@ defmodule NanoAi.LLM.Layers.Transformer do
           opts :: keyword()
         ) :: Axon.t()
   def post_norm(input, num_embed, num_heads, opts \\ []) do
-    ffn_type = Keyword.get(opts, :ffn_type, :gelu)
-    expand_factor = Keyword.get(opts, :expand_factor, 4)
+    opts = Keyword.validate!(opts, ffn_type: :gelu, expand_factor: 4, dropout_rate: 0.0)
 
     input
-    |> post_norm_attention_sublayer(num_embed, num_heads)
-    |> post_norm_ffn_sublayer(num_embed, ffn_type, expand_factor)
+    |> post_norm_attention_sublayer(num_embed, num_heads, opts[:dropout_rate])
+    |> post_norm_ffn_sublayer(num_embed, opts[:ffn_type], opts[:expand_factor], opts[:dropout_rate])
   end
 
-  defp pre_norm_attention_sublayer(input, num_embed, num_heads) do
+  defp pre_norm_attention_sublayer(input, num_embed, num_heads, dropout_rate) do
     input
     |> Axon.layer_norm()
-    |> CausalSelfAttention.layer(
-      num_embed,
-      num_heads
-    )
+    |> CausalSelfAttention.layer(num_embed, num_heads)
+    |> Axon.dropout(rate: dropout_rate)
     |> then(fn x ->
       Axon.add(input, x)
     end)
   end
 
-  defp pre_norm_ffn_sublayer(input, num_embed, ffn_type, expand_factor) do
+  defp pre_norm_ffn_sublayer(input, num_embed, ffn_type, expand_factor, dropout_rate) do
     input
     |> Axon.layer_norm()
-    |> apply_ffn(num_embed, ffn_type, expand_factor)
+    |> apply_ffn(num_embed, ffn_type, expand_factor, dropout_rate)
     |> then(fn y ->
       Axon.add(input, y)
     end)
   end
 
-  defp post_norm_attention_sublayer(input, num_embed, num_heads) do
+  defp post_norm_attention_sublayer(input, num_embed, num_heads, dropout_rate) do
     input
-    |> CausalSelfAttention.layer(
-      num_embed,
-      num_heads
-    )
+    |> CausalSelfAttention.layer(num_embed, num_heads)
+    |> Axon.dropout(rate: dropout_rate)
     |> then(fn attn_output ->
       input
       |> Axon.add(attn_output)
@@ -406,9 +400,9 @@ defmodule NanoAi.LLM.Layers.Transformer do
     end)
   end
 
-  defp post_norm_ffn_sublayer(input, num_embed, ffn_type, expand_factor) do
+  defp post_norm_ffn_sublayer(input, num_embed, ffn_type, expand_factor, dropout_rate) do
     input
-    |> apply_ffn(num_embed, ffn_type, expand_factor)
+    |> apply_ffn(num_embed, ffn_type, expand_factor, dropout_rate)
     |> then(fn ffn_output ->
       input
       |> Axon.add(ffn_output)
@@ -416,19 +410,19 @@ defmodule NanoAi.LLM.Layers.Transformer do
     end)
   end
 
-  defp apply_ffn(input, n_embed, ffn_type, expand_factor) do
+  defp apply_ffn(input, n_embed, ffn_type, expand_factor, dropout_rate) do
     case ffn_type do
       :gelu ->
-        FeedForward.gelu(input, n_embed, expand_factor: expand_factor)
+        FeedForward.gelu(input, n_embed, expand_factor: expand_factor, dropout_rate: dropout_rate)
 
       :reglu ->
-        FeedForward.reglu(input, n_embed, expand_factor: expand_factor)
+        FeedForward.reglu(input, n_embed, expand_factor: expand_factor, dropout_rate: dropout_rate)
 
       :geglu ->
-        FeedForward.geglu(input, n_embed, expand_factor: expand_factor)
+        FeedForward.geglu(input, n_embed, expand_factor: expand_factor, dropout_rate: dropout_rate)
 
       :siglu ->
-        FeedForward.siglu(input, n_embed, expand_factor: expand_factor)
+        FeedForward.siglu(input, n_embed, expand_factor: expand_factor, dropout_rate: dropout_rate)
     end
   end
 end

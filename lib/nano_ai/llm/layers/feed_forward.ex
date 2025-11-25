@@ -279,11 +279,14 @@ defmodule NanoAi.LLM.Layers.FeedForward do
           opts :: keyword()
         ) :: Axon.t()
   def gelu(input, n_embed, opts \\ [expand_factor: 4]) do
+    opts = Keyword.validate!(opts, expand_factor: 4, dropout_rate: 0.0)
+
     hidden_size = n_embed * opts[:expand_factor]
 
     input
     |> up_projection(hidden_size)
     |> activation_layer(:gelu)
+    |> Axon.dropout(rate: opts[:dropout_rate])
     |> down_projection(n_embed)
   end
 
@@ -358,12 +361,14 @@ defmodule NanoAi.LLM.Layers.FeedForward do
           opts :: keyword()
         ) :: Axon.t()
   def siglu(input, n_embed, opts \\ [expand_factor: 4]) do
+    opts = Keyword.validate!(opts, expand_factor: 4, dropout_rate: 0.0)
     hidden_size = n_embed * opts[:expand_factor]
 
     input
     |> gate_projection(hidden_size)
     |> activation_layer(:silu)
     |> Axon.multiply(up_projection(input, hidden_size))
+    |> Axon.dropout(rate: opts[:dropout_rate])
     |> down_projection(n_embed)
   end
 
@@ -430,12 +435,14 @@ defmodule NanoAi.LLM.Layers.FeedForward do
           opts :: keyword()
         ) :: Axon.t()
   def reglu(input, n_embed, opts \\ [expand_factor: 4]) do
+    opts = Keyword.validate!(opts, expand_factor: 4, dropout_rate: 0.0)
     hidden_size = n_embed * opts[:expand_factor]
 
     input
     |> gate_projection(hidden_size)
     |> activation_layer(:relu)
     |> Axon.multiply(up_projection(input, hidden_size))
+    |> Axon.dropout(rate: opts[:dropout_rate])
     |> down_projection(n_embed)
   end
 
@@ -517,12 +524,14 @@ defmodule NanoAi.LLM.Layers.FeedForward do
           opts :: keyword()
         ) :: Axon.t()
   def geglu(input, n_embed, opts \\ [expand_factor: 4]) do
+    opts = Keyword.validate!(opts, expand_factor: 4, dropout_rate: 0.0)
     hidden_size = n_embed * opts[:expand_factor]
 
     input
     |> gate_projection(hidden_size)
     |> activation_layer(:gelu)
     |> Axon.multiply(up_projection(input, hidden_size))
+    |> Axon.dropout(rate: opts[:dropout_rate])
     |> down_projection(n_embed)
   end
 
